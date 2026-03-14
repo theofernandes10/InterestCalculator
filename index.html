@@ -85,6 +85,20 @@
     font-weight: bold;
     color: var(--text);
     font-family: 'Courier New', monospace;
+    cursor: text;
+    border-bottom: 1px dashed transparent;
+    transition: border-color 0.15s;
+    outline: none;
+    min-width: 4ch;
+    text-align: right;
+  }
+  .ctrl-header .ctrl-val:hover {
+    border-bottom-color: var(--muted);
+  }
+  .ctrl-header .ctrl-val.editing {
+    border-bottom: 1.5px solid var(--accent);
+    color: var(--accent);
+    background: transparent;
   }
   input[type=range] {
     -webkit-appearance: none;
@@ -299,42 +313,42 @@
   <div class="ctrl">
     <div class="ctrl-header">
       <label>Initial investment</label>
-      <span class="ctrl-val" id="lP">R$ 300.000</span>
+      <span class="ctrl-val" id="lP" contenteditable="true" spellcheck="false" title="Click to edit">R$ 300.000</span>
     </div>
     <input type="range" id="sP" min="10000" max="1000000" step="10000" value="300000">
   </div>
   <div class="ctrl">
     <div class="ctrl-header">
       <label>Monthly contribution</label>
-      <span class="ctrl-val" id="lM">R$ 10.000</span>
+      <span class="ctrl-val" id="lM" contenteditable="true" spellcheck="false" title="Click to edit">R$ 10.000</span>
     </div>
     <input type="range" id="sM" min="0" max="50000" step="500" value="10000">
   </div>
   <div class="ctrl">
     <div class="ctrl-header">
       <label>Annual interest rate</label>
-      <span class="ctrl-val" id="lR">20%</span>
+      <span class="ctrl-val" id="lR" contenteditable="true" spellcheck="false" title="Click to edit">20%</span>
     </div>
     <input type="range" id="sR" min="1" max="30" step="0.5" value="20">
   </div>
   <div class="ctrl">
     <div class="ctrl-header">
       <label>Contribution growth / yr</label>
-      <span class="ctrl-val" id="lG">5%</span>
+      <span class="ctrl-val" id="lG" contenteditable="true" spellcheck="false" title="Click to edit">5%</span>
     </div>
     <input type="range" id="sG" min="0" max="20" step="0.5" value="5">
   </div>
   <div class="ctrl">
     <div class="ctrl-header">
       <label>Time horizon</label>
-      <span class="ctrl-val" id="lY">40 years</span>
+      <span class="ctrl-val" id="lY" contenteditable="true" spellcheck="false" title="Click to edit">40 years</span>
     </div>
     <input type="range" id="sY" min="5" max="50" step="1" value="40">
   </div>
   <div class="ctrl inflation-ctrl">
     <div class="ctrl-header">
       <label>Annual inflation rate</label>
-      <span class="ctrl-val" id="lI" style="color:var(--red)">4%</span>
+      <span class="ctrl-val" id="lI" contenteditable="true" spellcheck="false" title="Click to edit" style="color:var(--red)">4%</span>
     </div>
     <input type="range" id="sI" min="0" max="20" step="0.5" value="4">
   </div>
@@ -395,6 +409,79 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script>
 let chart, currentTab = 'stacked';
+
+// ── Editable value labels ──────────────────────────────────────────────────
+// Each entry: { labelId, sliderId, type: 'currency'|'pct'|'years', min, max }
+const editableCfg = [
+  { labelId: 'lP', sliderId: 'sP', type: 'currency', min: 0,   max: 1e12 },
+  { labelId: 'lM', sliderId: 'sM', type: 'currency', min: 0,   max: 1e9  },
+  { labelId: 'lR', sliderId: 'sR', type: 'pct',      min: 0.1, max: 1000 },
+  { labelId: 'lG', sliderId: 'sG', type: 'pct',      min: 0,   max: 1000 },
+  { labelId: 'lY', sliderId: 'sY', type: 'years',    min: 1,   max: 200  },
+  { labelId: 'lI', sliderId: 'sI', type: 'pct',      min: 0,   max: 100  },
+];
+
+function parseRaw(text, type) {
+  // Strip everything except digits, dot, comma → then normalise
+  const clean = text.replace(/[^\d.,]/g, '').replace(',', '.');
+  const val = parseFloat(clean);
+  return isNaN(val) ? null : val;
+}
+
+function fmtLabel(val, type) {
+  if (type === 'currency') return fmtBR(val);
+  if (type === 'pct')      return val + '%';
+  if (type === 'years')    return val + ' years';
+}
+
+function commitEdit(cfg, el) {
+  el.classList.remove('editing');
+  const raw = parseRaw(el.textContent, cfg.type);
+  if (raw === null || raw < cfg.min) { update(); return; } // revert
+  const val = Math.max(cfg.min, raw);
+  // Update slider (clamp to its range so it stays usable)
+  const slider = document.getElementById(cfg.sliderId);
+  slider.value = Math.min(Math.max(val, +slider.min), +slider.max);
+  // Override the actual simulation value via a data attr (for beyond-slider values)
+  slider.dataset.override = val;
+  update();
+}
+
+editableCfg.forEach(cfg => {
+  const el = document.getElementById(cfg.labelId);
+
+  el.addEventListener('focus', () => {
+    el.classList.add('editing');
+    // Show raw number for easy editing
+    const slider = document.getElementById(cfg.sliderId);
+    const val = +(slider.dataset.override || slider.value);
+    el.textContent = cfg.type === 'currency' ? Math.round(val) : val;
+    // Select all
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    window.getSelection().removeAllRanges();
+    window.getSelection().addRange(range);
+  });
+
+  el.addEventListener('blur', () => commitEdit(cfg, el));
+
+  el.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); el.blur(); }
+    if (e.key === 'Escape') {
+      el.classList.remove('editing');
+      update(); // revert display
+      el.blur();
+    }
+    // Only allow digits, dot, comma, backspace, arrows, etc.
+    const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab','Enter','Escape','.',','];
+    if (!allowed.includes(e.key) && !/^\d$/.test(e.key)) e.preventDefault();
+  });
+
+  // Prevent slider from overwriting label while user is editing
+  document.getElementById(cfg.sliderId).addEventListener('input', () => {
+    document.getElementById(cfg.sliderId).dataset.override = '';
+  });
+});
 
 function fmtBR(v) {
   return 'R$\u00a0' + Math.round(v).toLocaleString('pt-BR');
