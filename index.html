@@ -439,11 +439,12 @@ function commitEdit(cfg, el) {
   const raw = parseRaw(el.textContent, cfg.type);
   if (raw === null || raw < cfg.min) { update(); return; } // revert
   const val = Math.max(cfg.min, raw);
-  // Update slider (clamp to its range so it stays usable)
   const slider = document.getElementById(cfg.sliderId);
-  slider.value = Math.min(Math.max(val, +slider.min), +slider.max);
-  // Override the actual simulation value via a data attr (for beyond-slider values)
+  // Store override FIRST, then update slider position (visually clamp, no effect on simulation)
   slider.dataset.override = val;
+  slider._settingFromCode = true;
+  slider.value = Math.min(Math.max(val, +slider.min), +slider.max);
+  slider._settingFromCode = false;
   update();
 }
 
@@ -452,11 +453,9 @@ editableCfg.forEach(cfg => {
 
   el.addEventListener('focus', () => {
     el.classList.add('editing');
-    // Show raw number for easy editing
     const slider = document.getElementById(cfg.sliderId);
     const val = +(slider.dataset.override || slider.value);
     el.textContent = cfg.type === 'currency' ? Math.round(val) : val;
-    // Select all
     const range = document.createRange();
     range.selectNodeContents(el);
     window.getSelection().removeAllRanges();
@@ -469,17 +468,11 @@ editableCfg.forEach(cfg => {
     if (e.key === 'Enter') { e.preventDefault(); el.blur(); }
     if (e.key === 'Escape') {
       el.classList.remove('editing');
-      update(); // revert display
+      update();
       el.blur();
     }
-    // Only allow digits, dot, comma, backspace, arrows, etc.
     const allowed = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab','Enter','Escape','.',','];
     if (!allowed.includes(e.key) && !/^\d$/.test(e.key)) e.preventDefault();
-  });
-
-  // Prevent slider from overwriting label while user is editing
-  document.getElementById(cfg.sliderId).addEventListener('input', () => {
-    document.getElementById(cfg.sliderId).dataset.override = '';
   });
 });
 
@@ -602,20 +595,31 @@ function updateChart(rows, P, Y) {
   }
 }
 
-function update() {
-  const P = +document.getElementById('sP').value;
-  const M = +document.getElementById('sM').value;
-  const R = +document.getElementById('sR').value;
-  const G = +document.getElementById('sG').value;
-  const Y = +document.getElementById('sY').value;
-  const I = +document.getElementById('sI').value;
+function getVal(sliderId) {
+  const slider = document.getElementById(sliderId);
+  const ov = slider.dataset.override;
+  return (ov !== undefined && ov !== '') ? +ov : +slider.value;
+}
 
-  document.getElementById('lP').textContent = fmtBR(P);
-  document.getElementById('lM').textContent = fmtBR(M);
-  document.getElementById('lR').textContent = R + '%';
-  document.getElementById('lG').textContent = G + '%';
-  document.getElementById('lY').textContent = Y + ' years';
-  document.getElementById('lI').textContent = I + '%';
+function update() {
+  const P = getVal('sP');
+  const M = getVal('sM');
+  const R = getVal('sR');
+  const G = getVal('sG');
+  const Y = Math.round(getVal('sY'));
+  const I = getVal('sI');
+
+  // Only update labels if not currently being edited
+  editableCfg.forEach(cfg => {
+    const el = document.getElementById(cfg.labelId);
+    if (!el.classList.contains('editing')) {
+      const vals = { lP: P, lM: M, lR: R, lG: G, lY: Y, lI: I };
+      const v = vals[cfg.labelId];
+      el.textContent = fmtLabel(v, cfg.type);
+      // Restore inflation red colour
+      if (cfg.labelId === 'lI') el.style.color = 'var(--red)';
+    }
+  });
 
   const rows = simulate(P, M, R, Y, G, I);
   const final = rows[Y];
@@ -662,7 +666,13 @@ function update() {
   }).join('');
 }
 
-['sP','sM','sR','sG','sY','sI'].forEach(id => document.getElementById(id).addEventListener('input', update));
+['sP','sM','sR','sG','sY','sI'].forEach(id => {
+  document.getElementById(id).addEventListener('input', function() {
+    if (this._settingFromCode) return; // ignore programmatic updates
+    this.dataset.override = ''; // user dragged — clear override
+    update();
+  });
+});
 update();
 </script>
 </body>
